@@ -11,7 +11,8 @@ int main(int argc, char *argv[])
     w.setCentralWidget(&viewer);
     w.m_viewer = &viewer;
 
-    std::string filename = "/home/serena/graphics/InvMat/models/bunny.abq";
+    // std::string filename = "/home/serena/graphics/InvMat/models/Cactus.abq";
+    string filename = "bunny";
     viewer.load(filename);
 
     w.show();

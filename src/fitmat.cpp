@@ -10,6 +10,8 @@
 #include "unsupported/Eigen/ArpackSupport"
 #include "optimization.h"
 
+#include <fstream>
+
 using namespace std;
 using namespace Eigen;
 using namespace igl;
@@ -180,6 +182,49 @@ void TetMesh::load(std::string filename)
     std::cout<<"number of elements:  "<<nt<<std::endl;
 }
 
+void TetMesh::loadTetgenFiles(std::string modelName)
+{
+    // Read vertices
+    ifstream finVtx(_MODEL_PREFIX_ + modelName + "/" + modelName + ".1.node");
+    if(!finVtx.is_open())
+        cout << "Unable to open vertex file" << endl;
+    int row, col, tmp, row_index;
+    finVtx >> row >> col >> tmp >> tmp;
+    m_V.resize(row, col);
+    for(int i = 0; i < row; i++)
+    {
+        finVtx >> row_index;
+        for(int j = 0; j < col; j++)
+            finVtx >> m_V(i, j);
+    }
+
+    // read elements/tetrahedrons
+    ifstream finTet(_MODEL_PREFIX_ + modelName + "/" + modelName + ".1.ele");
+    if(!finTet.is_open())
+        cout << "Unable to open element file" << endl;
+    finTet >> row >> col >> tmp;
+    m_F.resize(row, col);
+    for(int i = 0; i < row; i++)
+    {
+        finTet >> row_index;
+        for(int j = 0; j < col; j++)
+            finTet >> m_F(i, j);
+    }
+
+    // Compute the normals
+    per_vertex_normals(m_V, m_F, m_N);
+
+    nv = m_V.rows();
+    nt = m_F.rows();
+
+    m_V0 = m_V;
+    PreCompute();
+    calcTetCenter();
+
+    std::cout<<"number of verties:  "<<nv<<std::endl;
+    std::cout<<"number of elements:  "<<nt<<std::endl;
+}
+
 void TetMesh::PreCompute()
 {
     m_KLamda.resize(nt);
@@ -334,11 +379,6 @@ void TetMesh::draw()
     opengl2::draw_mesh(m_V, m_F, m_N, m_C);
 }
 
-void TetMesh::draw(float alpha)
-{
-
-}
-
 void TetMesh::calcTetCenter()
 {
     m_FCenter = DMatrix::Zero(m_F.rows(), 3);
@@ -364,7 +404,13 @@ FitMat::FitMat()
 
 void FitMat::LoadMesh(std::string filename)
 {
-    m_mesh.load(filename);
+    if(filename.substr(filename.length() - 4) == ".abq")
+        m_mesh.load(filename);
+    else
+    {
+        tetrahedronize(filename);
+        m_mesh.loadTetgenFiles(filename);
+    }
 
     // Calculate laplacian
     std::vector<std::set<int>> vToE(m_mesh.nv);

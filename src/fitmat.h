@@ -8,6 +8,8 @@ struct TetMesh
 
     void load(std::string filename);
 
+    void loadTetgenFiles(std::string modelName);
+
     void PreCompute();
 
     double getVolume(int el);
@@ -19,8 +21,6 @@ struct TetMesh
     DMatrix& getElementColor();
 
     void draw();
-
-    void draw(float alpha);
 
     void calcTetCenter();
 
