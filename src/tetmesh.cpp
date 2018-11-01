@@ -280,7 +280,7 @@ void TetMesh::PreCompute()
         // EB = E * B
         double EB[72];
 
-        // Precompute Ke's gradient at Young's modulus
+        // Precompute Ke's gradient at lambda
         {
             for(int ii = 0; ii < 72; ii++)
             EB[ii] = 0.0;
@@ -301,7 +301,7 @@ void TetMesh::PreCompute()
             KE_lambda *= getVolume(el);
         }
 
-        // Precompute Ke's gradient at Poission's ratio
+        // Precompute Ke's gradient at mu
         {
             for(int ii = 0; ii < 72; ii++)
             EB[ii] = 0.0;
