@@ -37,8 +37,6 @@ void MainWindow::doOptimize()
     double fz = ui->zLineEdit->text().toDouble();
     double mag = ui->magLineEdit->text().toDouble();
 
-
-
     vec3 fext(fx,fy,fz);
     if(fext.norm() > 1e-10)
         fext.normalize();
@@ -58,10 +56,10 @@ void MainWindow::doOptimize()
     std::vector<int> visPoints;
     std::vector<vec3> visDisp;
 
-    std::vector<vec3> appliedForce(nv,vec3::Zero());
+    std::vector<vec3> appliedForce(nv, vec3::Zero());
     for(int vid : actPoints)
         appliedForce[vid] = fext;
-    std::vector<bool> flag(nv,false);
+    std::vector<bool> flag(nv, false);
     for(int vid: fixedPoints)
         flag[vid] = true;
     for(int i = 0; i < nv; i++)
@@ -71,9 +69,9 @@ void MainWindow::doOptimize()
         visPoints.push_back(i);
         vec3 vd = V.row(i) - V0.row(i);
         visDisp.push_back(vd);
-
     }
-    m_viewer->m_fitmat.Init(fixedPoints,visPoints,visDisp,appliedForce);
+    
+    m_viewer->m_fitmat.Init(fixedPoints, visPoints, visDisp, appliedForce);
 
     int nr = ui->nRLineEdit->text().toInt();
     double lambda = ui->regLineEdit->text().toDouble();
@@ -139,6 +137,7 @@ void MainWindow::applyForce()
     double Lambda = nu * E / ((1.0 + nu) * (1.0 - 2.0 * nu));
     double Mu = E / (2.0 * (1.0 + nu));
 
+    // Assmeble from local to global
     for(int el = 0; el < nt; el++)
     {
         DMatrix Ke = m.m_KLamda[el] * Lambda + m.m_KMu[el] * Mu;

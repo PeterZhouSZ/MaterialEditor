@@ -2,45 +2,7 @@
 #define FITMAT_H
 
 #include "settings.h"
-
-struct TetMesh
-{
-
-    void load(std::string filename);
-
-    void loadTetgenFiles(std::string modelName);
-
-    void PreCompute();
-
-    double getVolume(int el);
-
-    void visualizeEv(DVector &Ev);
-
-    void visualizeEe(DVector &Ee);
-
-    DMatrix& getElementColor();
-
-    void draw();
-
-    void calcTetCenter();
-
-    DMatrix& getTetCenter();
-
-    DMatrix m_V0;
-    DMatrix m_V;
-    IMatrix m_F;
-    DMatrix m_N;
-    DMatrix m_C;
-
-    DMatrix m_FCenter;
-    DMatrix m_Ce; // color per tetrahedrons
-
-    std::vector<DMatrix> m_KLamda,m_KMu;
-    std::vector<DMatrix> m_KE;
-
-    int nv = 0,nt = 0;
-    std::vector<int>  m_dofID;
-};
+#include "tetmesh.h"
 
 class FitMat
 {
@@ -62,20 +24,16 @@ public:
     void ComputeGradientSub(double* E,double& energy,double* grad,double* Jac);
 
     // Compute average color of each vertex
-    DVector computeEvSub(double* E, int ne);
-    DVector computeEvFull(double* E, int nt);
-protected:
-    void UpdateStiffness(DSparse& K,double* E);
-
-public:
+    DVector ComputeEvSub(double* E, int ne);
+    DVector ComputeEvFull(double* E, int nt);
 
     TetMesh          m_mesh;
 
     DVector          m_fext;
 
-    std::vector<int> m_visPoints;
-    DVector          m_visDisp;
-    std::vector<int> m_visDofs;
+    std::vector<int> m_visPoints; // visible points: points that are not fixed
+    DVector          m_visDisp; // displacement of visible points
+    std::vector<int> m_visDofs; // mapping from global to local of visible points
 
     std::vector<int> m_fixPoints;
 
@@ -85,10 +43,11 @@ public:
     DSparse          m_Lap;
     double           m_lambda = 0e-5;
 
-    DMatrix          m_Phi,m_PhiT;
+    DMatrix          m_Phi, m_PhiT;
     DVector          m_eigVal;
 
-
+protected:
+    void UpdateStiffness(DSparse& K,double* E);
 
 };
 

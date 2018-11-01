@@ -1,11 +1,5 @@
 ﻿#include "fitmat.h"
-
-#include <igl/jet.h>
-#include <igl/per_vertex_normals.h>
-#include <igl/opengl2/draw_mesh.h>
 //#include "ceres/ceres.h"
-
-#include "abqparser.h"
 
 #include "unsupported/Eigen/ArpackSupport"
 #include "optimization.h"
@@ -14,388 +8,6 @@
 
 using namespace std;
 using namespace Eigen;
-using namespace igl;
-
-void TetMesh::load(std::string filename)
-{
-    //const char* etype="C3D4";
-    //char ** elementType = &etype;
-    printf("Parsing %s...\n",filename);fflush(NULL);
-
-    std::vector<int> v(4);
-
-    // parse the abaqus file
-    ABQParser abqParser;
-
-    if (abqParser.open(filename.c_str()) != 0)
-    {
-        printf("Error: could not open file %s.\n",filename);
-        return;
-    }
-
-    int mode = 0;
-
-    // pass 1: determine number of vertices and number of elements
-
-    int numVertices = 0;
-    int numElements = 0;
-
-
-
-
-    char s[4096];
-
-    while (abqParser.getNextLine(s) != 0)
-    {
-        if ((mode == 0) && (strncmp(s,"*NODE",5)==0))
-        {
-            mode = 1;
-            continue;
-        }
-
-        // seek for *ELEMENT
-        if ((mode == 1) && (strncmp(s,"*ELEMENT",8)==0))
-        {
-            mode = 2;
-            continue;
-        }
-
-        if ((mode == 2) && (s[0] == '*'))
-        {
-            mode = 3; // reached *ELSET
-        }
-
-        // in mode 1, increase numVertices counter
-        if (mode == 1)
-            numVertices++;
-
-        // in mode 2, read element info
-        if (mode == 2)
-            numElements++;
-
-
-    }
-
-    abqParser.rewindToStart();
-
-
-    m_V.resize(numVertices,3);
-    m_F.resize(numElements,4);
-
-    // pass 3: read vertices and elements
-
-    abqParser.rewindToStart();
-
-    numElements = 0;
-    numVertices = 0;
-    mode = 0;
-
-
-    while (abqParser.getNextLine(s) != 0)
-    {
-        //printf("%s\n", s);
-        // now, next input line is in s
-
-        // seek for *NODE
-        if ((mode == 0) && (strncmp(s,"*NODE",5)==0))
-        {
-            mode = 1;
-            continue;
-        }
-
-        // seek for *ELEMENT
-        if ((mode == 1) && (strncmp(s,"*ELEMENT",8)==0))
-        {
-            mode = 2;
-            continue;
-        }
-
-        if ((mode == 2) && (s[0] == '*'))
-        {
-            mode = 3; // reached *ELSET
-        }
-
-        // in mode 1, read the vertex info
-        if (mode == 1)
-        {
-            int index;
-            double x,y,z;
-            sscanf(s,"%d,%lf,%lf,%lf",&index,&x,&y,&z);
-
-            m_V.row(numVertices) = vec3(x,y,z);
-
-            numVertices++;
-        }
-
-        // in mode 2, read element info
-        if (mode == 2)
-        {
-            int index;
-            sscanf(s,"%d",&index);
-            char * ch = s;
-            for(int i=0; i<4; i++)
-            {
-                // seek for next comma
-                while((*ch != ',') && (*ch != 0))
-                    ch++;
-
-                if (*ch == 0)
-                {
-                    printf("Error parsing line %s.\n", s);
-                    //free(v);
-                    throw 12;
-                }
-
-                ch++;
-                sscanf(ch,"%d",&v[i]);
-            }
-
-            for (int k=0; k<4; k++)
-            {
-                v[k]--; // compensate for fact that vertices are 1-numbered in abq files
-            }
-
-
-
-            for(int j=0; j<4; j++) // vertices are 1-indexed in .ele files
-            {
-
-                m_F(numElements,j) = v[j];
-            }
-
-            numElements++;
-        }
-    }
-    abqParser.close();
-
-    // Compute the normals
-    per_vertex_normals(m_V, m_F, m_N);
-
-    nv = m_V.rows();
-    nt = m_F.rows();
-
-    m_V0 = m_V;
-    PreCompute();
-    calcTetCenter();
-
-    std::cout<<"number of verties:  "<<nv<<std::endl;
-    std::cout<<"number of elements:  "<<nt<<std::endl;
-}
-
-void TetMesh::loadTetgenFiles(std::string modelName)
-{
-    // Read vertices
-    ifstream finVtx(_MODEL_PREFIX_ + modelName + "/" + modelName + ".1.node");
-    if(!finVtx.is_open())
-        cout << "Unable to open vertex file" << endl;
-    int row, col, tmp, row_index;
-    finVtx >> row >> col >> tmp >> tmp;
-    m_V.resize(row, col);
-    for(int i = 0; i < row; i++)
-    {
-        finVtx >> row_index;
-        for(int j = 0; j < col; j++)
-            finVtx >> m_V(i, j);
-    }
-
-    // read elements/tetrahedrons
-    ifstream finTet(_MODEL_PREFIX_ + modelName + "/" + modelName + ".1.ele");
-    if(!finTet.is_open())
-        cout << "Unable to open element file" << endl;
-    finTet >> row >> col >> tmp;
-    m_F.resize(row, col);
-    for(int i = 0; i < row; i++)
-    {
-        finTet >> row_index;
-        for(int j = 0; j < col; j++)
-            finTet >> m_F(i, j);
-    }
-
-    // Compute the normals
-    per_vertex_normals(m_V, m_F, m_N);
-
-    nv = m_V.rows();
-    nt = m_F.rows();
-
-    m_V0 = m_V;
-    PreCompute();
-    calcTetCenter();
-
-    std::cout<<"number of verties:  "<<nv<<std::endl;
-    std::cout<<"number of elements:  "<<nt<<std::endl;
-}
-
-void TetMesh::PreCompute()
-{
-    m_KLamda.resize(nt);
-    m_KMu.resize(nt);
-
-    for(int el = 0; el < nt; el++)
-    {
-        double MInv[16];
-
-        {
-            DMatrix M(4,4);
-            for(int ii = 0; ii < 4; ii++)
-                for(int jj = 0; jj < 3; jj++)
-                {
-                    int vid = m_F(el,ii);
-                    M(jj,ii) = m_V(vid,jj);
-                    M(3,ii) = 1.0;
-                }
-
-            M = M.inverse();
-            for(int ii = 0; ii < 4; ii++)
-                for(int jj = 0; jj < 4; jj++)
-                    MInv[4 * ii + jj] = M(ii,jj);
-        }
-        double B[72] =
-        { MInv[0], 0, 0, MInv[4], 0, 0, MInv[8], 0, 0, MInv[12], 0, 0,
-          0, MInv[1], 0, 0, MInv[5], 0, 0, MInv[9], 0, 0, MInv[13], 0,
-          0, 0, MInv[2], 0, 0, MInv[6], 0, 0, MInv[10], 0, 0, MInv[14],
-          MInv[1], MInv[0], 0, MInv[5], MInv[4], 0, MInv[9], MInv[8],
-          0, MInv[13], MInv[12], 0, 0, MInv[2], MInv[1], 0, MInv[6], MInv[5],
-          0, MInv[10], MInv[9], 0, MInv[14], MInv[13], MInv[2], 0, MInv[0],
-          MInv[6], 0, MInv[4], MInv[10], 0, MInv[8], MInv[14], 0, MInv[12] };
-        double lambda = 1.0;
-        double mu = 0;
-        double E[36] = { lambda + 2 * mu, lambda, lambda, 0, 0, 0,
-                         lambda, lambda + 2 * mu, lambda, 0, 0, 0,
-                         lambda, lambda, lambda + 2 * mu, 0, 0, 0,
-                         0, 0, 0, mu, 0, 0,
-                         0, 0, 0, 0, mu, 0,
-                         0, 0, 0, 0, 0, mu };
-
-        // EB = E * B
-        double EB[72];
-
-        for(int ii = 0; ii < 72; ii++)
-            EB[ii] = 0.0;
-
-        for (int i=0; i<6; i++)
-            for (int j=0; j<12; j++)
-                for (int k=0; k<6; k++)
-                    EB[12 * i + j] += E[6 * i + k] * B[12 * k + j];
-
-        DMatrix& KE = m_KLamda[el];
-        KE.resize(12,12);
-        KE.setZero();
-        for (int i=0; i<12; i++)
-            for (int j=0; j<12; j++)
-                for (int k=0; k<6; k++)
-                    KE(i,j) += B[12 * k + i] * EB[12 * k + j];
-
-        KE *= getVolume(el);
-    }
-
-    for(int el = 0; el < nt; el++)
-    {
-        double MInv[16];
-
-        {
-            DMatrix M(4,4);
-            for(int ii = 0; ii < 4; ii++)
-                for(int jj = 0; jj < 3; jj++)
-                {
-                    int vid = m_F(el,ii);
-                    M(jj,ii) = m_V(vid,jj);
-                    M(3,ii) = 1.0;
-                }
-
-            M = M.inverse();
-            for(int ii = 0; ii < 4; ii++)
-                for(int jj = 0; jj < 4; jj++)
-                    MInv[4 * ii + jj] = M(ii,jj);
-        }
-
-        double B[72] =
-        { MInv[0], 0, 0, MInv[4], 0, 0, MInv[8], 0, 0, MInv[12], 0, 0,
-          0, MInv[1], 0, 0, MInv[5], 0, 0, MInv[9], 0, 0, MInv[13], 0,
-          0, 0, MInv[2], 0, 0, MInv[6], 0, 0, MInv[10], 0, 0, MInv[14],
-          MInv[1], MInv[0], 0, MInv[5], MInv[4], 0, MInv[9], MInv[8],
-          0, MInv[13], MInv[12], 0, 0, MInv[2], MInv[1], 0, MInv[6], MInv[5],
-          0, MInv[10], MInv[9], 0, MInv[14], MInv[13], MInv[2], 0, MInv[0],
-          MInv[6], 0, MInv[4], MInv[10], 0, MInv[8], MInv[14], 0, MInv[12] };
-        double lambda = 0.0;
-        double mu = 1.0;
-        double E[36] = { lambda + 2 * mu, lambda, lambda, 0, 0, 0,
-                         lambda, lambda + 2 * mu, lambda, 0, 0, 0,
-                         lambda, lambda, lambda + 2 * mu, 0, 0, 0,
-                         0, 0, 0, mu, 0, 0,
-                         0, 0, 0, 0, mu, 0,
-                         0, 0, 0, 0, 0, mu };
-
-        // EB = E * B
-        double EB[72];
-
-        for(int ii = 0; ii < 72; ii++)
-            EB[ii] = 0.0;
-
-        for (int i=0; i<6; i++)
-            for (int j=0; j<12; j++)
-                for (int k=0; k<6; k++)
-                    EB[12 * i + j] += E[6 * i + k] * B[12 * k + j];
-
-        DMatrix& KE = m_KMu[el];
-        KE.resize(12,12);
-        KE.setZero();
-        for (int i=0; i<12; i++)
-            for (int j=0; j<12; j++)
-                for (int k=0; k<6; k++)
-                    KE(i,j) += B[12 * k + i] * EB[12 * k + j];
-
-        KE *= getVolume(el);
-    }
-}
-
-double TetMesh::getVolume(int el)
-{
-    //return (1.0 / 6 * fabs( dot(*a - *d, cross(*b - *d, *c - *d)) ));
-    vec3 a = m_V.row(m_F(el,0));
-    vec3 b = m_V.row(m_F(el,1));
-    vec3 c = m_V.row(m_F(el,2));
-    vec3 d = m_V.row(m_F(el,3));
-    return 1.0/6 * std::abs((a - d).dot((b - d).cross(c - d)));
-}
-
-void TetMesh::visualizeEv(DVector &Ev)
-{
-    jet(Ev, false, m_C);
-}
-
-void TetMesh::visualizeEe(DVector &Ee)
-{
-    jet(Ee, false, m_Ce);
-}
-
-DMatrix& TetMesh::getElementColor()
-{
-    return m_Ce;
-}
-
-void TetMesh::draw()
-{
-    glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
-    opengl2::draw_mesh(m_V, m_F, m_N, m_C);
-}
-
-void TetMesh::calcTetCenter()
-{
-    m_FCenter = DMatrix::Zero(m_F.rows(), 3);
-    for(int i = 0; i < m_F.rows(); i++)
-    {
-        for(int j = 0; j < m_F.cols(); j++)
-            m_FCenter.row(i) += m_V.row(m_F(i, j));
-        m_FCenter.row(i) /= 4.0;
-    }
-}
-
-DMatrix& TetMesh::getTetCenter()
-{
-    return m_FCenter;
-}
-
-
 
 FitMat::FitMat()
 {
@@ -412,8 +24,8 @@ void FitMat::LoadMesh(std::string filename)
         m_mesh.loadTetgenFiles(filename);
     }
 
-    // Calculate laplacian
-    std::vector<std::set<int>> vToE(m_mesh.nv);
+    // Calculate Laplacian matrix
+    std::vector<std::set<int>> vToE(m_mesh.nv); // vertex to element connnection
 
     for(int el = 0; el < m_mesh.nt; el++)
         for(int i = 0; i < 4; i++)
@@ -422,13 +34,13 @@ void FitMat::LoadMesh(std::string filename)
             vToE[vid].insert(el);
         }
 
-    std::vector<std::set<int>> EtoE(m_mesh.nt);
-
+    std::vector<std::set<int>> EtoE(m_mesh.nt); // element to element connection
     for(auto& vE : vToE)
         for(int el : vE)
             EtoE[el].insert(vE.begin(),vE.end());
 
-    std::vector<Eigen::Triplet<double>> triplets;
+    // Initialize the slot in Laplacian
+    std::vector<Eigen::Triplet<double>> triplets; 
     for(auto& EE : EtoE)
         for(int elA : EE)
             for(int elB : EE)
@@ -442,8 +54,8 @@ void FitMat::LoadMesh(std::string filename)
         std::set<int>& EE = EtoE[el];
         for(int elB : EE)
             if(elB != el)
-                L.coeffRef(el,elB) = -1;
-        L.coeffRef(el,el) = EE.size() - 1;
+                L.coeffRef(el,elB) = -1; // the adjacent term
+        L.coeffRef(el,el) = EE.size() - 1; // the degree term
     }
 
     m_Lap = L;
@@ -463,18 +75,19 @@ void FitMat::Init(std::vector<int>& fixPoints,
     m_mesh.m_dofID.assign(3 * nv, 0);
     for(int vid : fixPoints)
         for(int i = 0; i < 3; i++)
-            m_mesh.m_dofID[3 * vid + i] = -1;
+            m_mesh.m_dofID[3 * vid + i] = -1; // set to -1 if the vertex is fixed
 
     int neq = 0;
     for(int i = 0; i < 3 * nv; i++)
         if(m_mesh.m_dofID[i] >= 0)
-            m_mesh.m_dofID[i] = neq++;
+            m_mesh.m_dofID[i] = neq++; // set the global index (ignoring the fixed vertex)
 
     m_neq = neq;
 
     m_K = DSparse(neq,neq);
     std::vector<Eigen::Triplet<double>> triplets;
 
+    // initialize m_K's slot
     for(int el = 0; el < nt; el++)
     {
         for(int ii = 0; ii < 4; ii++)
@@ -496,6 +109,7 @@ void FitMat::Init(std::vector<int>& fixPoints,
 
     m_K.setFromTriplets(triplets.begin(),triplets.end());
 
+    // Assemble 
     m_visPoints = visPoints;
     m_visDisp.resize(m_visPoints.size() * 3);
     m_visDofs.resize(m_visPoints.size() * 3);
@@ -503,10 +117,12 @@ void FitMat::Init(std::vector<int>& fixPoints,
         for(int j = 0; j < 3; j++)
         {
             int id = m_mesh.m_dofID[3 * m_visPoints[i] + j];
-            m_visDofs[3 * i + j] = id;
-            m_visDisp[3 * i + j] = visDisp[i][j];
+            m_visDofs[3 * i + j] = id; // mapping from global to local for visible points
+            m_visDisp[3 * i + j] = visDisp[i][j]; // displacement of visible points
         }
 
+    // Initialize the user-defined force at non-fixed vertex
+    // For fixed vertex, we can simply removed it to make the optimization problem unconstrainted
     m_fext.resize(neq);
 
     for(int vid = 0; vid < nv; vid++)
@@ -518,6 +134,7 @@ void FitMat::Init(std::vector<int>& fixPoints,
         }
 }
 
+// Compute energy and gradient using model reduction
 void FitMat::ComputeGradientSub(double* Esub,double& energy,double* grad,double* Jac)
 {
     DSparse K = m_K;
@@ -534,15 +151,14 @@ void FitMat::ComputeGradientSub(double* Esub,double& energy,double* grad,double*
 
     Eigen::SparseLU<DSparse> solver;
     {
-
-        UpdateStiffness(K,Efull.data());
+        UpdateStiffness(K, Efull.data());
         solver.compute(K);
         ubat =  solver.solve(fbat); // ubat = u* = K^(-1) * f
 
         for(int i = 0; i < m_visDofs.size(); i++)
             dubat[i] = ubat[m_visDofs[i]] - m_visDisp[i]; // du = u* - u
 
-        energy = 0.5 * dubat.squaredNorm();
+        energy = 0.5 * dubat.squaredNorm(); // || K^(-1) * f - u ||^2
 
 
         if(grad == nullptr) return;
@@ -552,7 +168,7 @@ void FitMat::ComputeGradientSub(double* Esub,double& energy,double* grad,double*
 
         for(int ir = 0; ir < ne; ir++)
         {
-            UpdateStiffness(DK,m_Phi.data() + ir * ne); // compute each p(K)/p(q_i)
+            UpdateStiffness(DK, m_Phi.data() + ir * ne); // compute each p(K)/p(q_i)
                                                         // p denote partial derivative
             DVector Df = DK * ubat; // DK: p(K)/p(q_i)   ubat: K^(-1) * f
             Df = solver.solve(Df); // Df = K^(-1) * p(K)/p(q_i) * K^(-1) * f
@@ -563,6 +179,7 @@ void FitMat::ComputeGradientSub(double* Esub,double& energy,double* grad,double*
     }
 }
 
+// Compute the energy and gradient without model reduction
 void FitMat::ComputeGradient(double* E,double& energy,double* grad,double* Jac)
 {
     DSparse K = m_K;
@@ -584,41 +201,41 @@ void FitMat::ComputeGradient(double* E,double& energy,double* grad,double* Jac)
         solver.compute(K);
         ubat = solver.solve(fbat); // Ku = f -> u* = K^-1 * f
 
-        // Calculate energy or F
+        // Calculate energy of F
         for(int i = 0; i < m_visDofs.size(); i++)
             dubat[i] = ubat[m_visDofs[i]] - m_visDisp[i]; // delta(u) = u* - u
 
         energy = 0.5 * dubat.squaredNorm();
         DVector LapE = m_Lap * EV;
-        double energyLap = 0.5 * m_lambda * LapE.squaredNorm(); // lambda * E^T * E
+        double energyLap = 0.5 * m_lambda * LapE.squaredNorm(); // lambda * E^T * L * E
 
         energy += energyLap;
 
         if(grad == nullptr) return;
 
-        // Calculate gradient or f
+        // Calculate gradient of f
         Eigen::Map<DVector>(grad,nt) = m_lambda * (m_Lap * LapE); // gradient of lambda * E^T * E
 
         for(int i = 0; i < m_visDofs.size(); i++)
             LtU[m_visDofs[i]] = dubat[i];
-        LtU = solver.solve(LtU); // L^t * u = L^t * K^-1 * f
+        LtU = solver.solve(LtU); // L^t * u = K^-1 * (K^-1 * f - u) 
 
         for(int el = 0; el < nt; el++)
         {
             DMatrix& Ke = m_mesh.m_KE[el];
-            DVector ltue(12);
+            DVector ltue(12); // element's (L^T * u)_e
             ltue.setZero();
             for(int i = 0; i < 4; i++)
                 for(int j = 0; j < 3; j++)
                 {
-                    int vid = m_mesh.m_F(el,i);
-                    int gid = 3 * vid + j;
-                    int lid = m_mesh.m_dofID[gid];
-                    if(lid >= 0)
+                    int vid = m_mesh.m_F(el, i);
+                    int gid = 3 * vid + j; // global id
+                    int lid = m_mesh.m_dofID[gid]; // local id
+                    if(lid >= 0) // not fixed
                         ltue[3 * i + j] = LtU[lid];
                 }
 
-            ltue = Ke * ltue;
+            ltue = Ke * ltue; // grad(K)_E * K^(-1) * (K^-1 * f - u) 
 
             for(int i = 0; i < 4; i++)
                 for(int j = 0; j < 3; j++)
@@ -628,9 +245,9 @@ void FitMat::ComputeGradient(double* E,double& energy,double* grad,double* Jac)
                     int lid = m_mesh.m_dofID[gid];
                     if(lid >= 0)
                         grad[el] += -1.0 * ltue[3 * i + j] * ubat[lid];
+                        // -1.0 * K^(-1)grad(K)_E * K^(-1)f * (K^-1 * f - u) 
                 }
         }
-
     }
 
 }
@@ -709,7 +326,7 @@ void FitMat::DoOptimizeSubLap(int nr)
 
     // Map Ee to color
     double *Ee = const_cast<double*>(&x[0]);
-    DVector Ev = computeEvSub(Ee, ne);
+    DVector Ev = ComputeEvSub(Ee, ne);
     m_mesh.visualizeEv(Ev);
     DVector EFull = m_Phi * Eigen::Map<DVector>(Ee, m_Phi.cols());
     m_mesh.visualizeEe(EFull);
@@ -723,10 +340,10 @@ void FitMat::DoOptimizeFull()
     DVector E(nt);
     DVector dE(nt);
 
-    double Y = 1.0e6;
-    double nu = 0.33;
-    double Lambda = nu * Y / ((1.0 + nu) * (1.0 - 2.0 * nu));
-    double Mu = Y / (2.0 * (1.0 + nu));
+    double Y = 1.0e6; // Young's modulus
+    double nu = 0.33; // Poission's ratio
+    double Lambda = nu * Y / ((1.0 + nu) * (1.0 - 2.0 * nu)); // lambda coefficient
+    double Mu = Y / (2.0 * (1.0 + nu)); // lambda coefficient
     m_mesh.m_KE.resize(nt);
     for(int el = 0; el < nt; el++)
         m_mesh.m_KE[el] = Lambda * m_mesh.m_KLamda[el] + Mu * m_mesh.m_KMu[el];
@@ -758,7 +375,7 @@ void FitMat::DoOptimizeFull()
 
     // Map Et to color
     double *Et = const_cast<double*>(&x[0]);
-    DVector Ev = computeEvFull(Et, nt);
+    DVector Ev = ComputeEvFull(Et, nt);
     m_mesh.visualizeEv(Ev);
     DVector EFull = Eigen::Map<DVector>(Et, nt);
     m_mesh.visualizeEe(EFull);
@@ -807,13 +424,13 @@ void FitMat::ComputeEigenMode(int nr)
     m_eigVal = eigVal;
 }
 
-DVector FitMat::computeEvSub(double* E, int ne)
+DVector FitMat::ComputeEvSub(double* E, int ne)
 {
     DVector EFull = m_Phi * Eigen::Map<DVector>(E, m_Phi.cols());
-    return computeEvFull(EFull.data(), m_Phi.cols());
+    return ComputeEvFull(EFull.data(), m_Phi.cols());
 }
 
-DVector FitMat::computeEvFull(double* E, int nt)
+DVector FitMat::ComputeEvFull(double* E, int nt)
 {
     int nv = m_mesh.nv;
 
