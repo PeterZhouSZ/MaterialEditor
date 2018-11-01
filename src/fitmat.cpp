@@ -411,7 +411,7 @@ void FitMat::ComputeEigenMode(int nr)
 {
     Eigen::ArpackGeneralizedSelfAdjointEigenSolver<DSparse,Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>>, true> aparckSolver;
 
-    aparckSolver.compute(m_Lap,nr,"SM");
+    aparckSolver.compute(m_Lap, nr, "SM");
 
     DMatrix Phi = aparckSolver.eigenvectors();
     DVector eigVal = aparckSolver.eigenvalues();

@@ -36,6 +36,7 @@ FORMS += \
 HEADERS += \
     ../../graphics/InvMat/src/abqparser.h \
     ../../graphics/InvMat/src/fitmat.h \
+    ../../graphics/InvMat/src/tetmesh.h \
     ../../graphics/InvMat/src/mainwindow.h \
     ../../graphics/InvMat/src/settings.h \
     ../../graphics/InvMat/src/viewer.h \
@@ -58,6 +59,7 @@ HEADERS += \
 SOURCES += \
     ../../graphics/InvMat/src/abqparser.cpp \
     ../../graphics/InvMat/src/fitmat.cpp \
+    ../../graphics/InvMat/src/tetmesh.cpp \
     ../../graphics/InvMat/src/main.cpp \
     ../../graphics/InvMat/src/mainwindow.cpp \
     ../../graphics/InvMat/src/viewer.cpp \
